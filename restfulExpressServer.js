@@ -1,59 +1,94 @@
 const express = require('express');
 const app = express();
-const fs = require('fs');
-const bodyParser = require('body-parser');
+// const bodyParser = require('body-parser');
 const logger = require('morgan');
 const PORT = 3000;
+const { Client } = require('pg');
+const config = require('./config.json')[process.env.NODE_ENV||"dev"];
+const client = new Client({
+    connectionString: config.connectionString,
+});
+client.connect();
 
-app.use(bodyParser.json());
+
+app.use(express.json());
 app.use(logger('dev'));
 
+//GET METHOD for homepage
 app.get('/', (req, res)=>{
     res.send('Welcome to Brandon\'s Pet Shop II');
+    console.log('Response sent');
 });
 
-app.get('/pets/:index', (req, res)=>{
-    let petIndex = req.params.index;
-    console.log(petIndex);
-        fs.readFile('./pets.json', 'utf8', function(error, petFile){
-            if (error){
-                res.status(500);
-                res.send(error);
-                res.send('Not Found');
-                console.error('There has been an error: ');
-            } else {
-                let petData = JSON.parse(petFile);
-                res.status(200);
-                res.send(petData[petIndex]);
-                console.log('Response sent');
-            }
-        }) 
+//GET METHOD for querying ALL pets
+app.get('/api/pets', (req, res)=>{
+    client.query('SELECT * FROM pets;')
+    .then(result => {
+        res.send(result.rows);
+    })
 });
 
-app.post('/pets', (req, res)=>{
-    let postPet = req.body;
-    fs.readFile('./pets.json', 'utf8', (error, data)=>{
-        if(error){
-            console.log('Error: ', error);
-            res.status(500);
-            res.send(error);
+//GET METHOD for querying pets by ID
+app.get('/api/pets/:id', (req, res)=>{
+    let petId = req.params.id;
+    client.query('SELECT * FROM pets WHERE id=$1', [petId])
+    .then(result => {
+        if(result.rows.length === 0){
+            res.status(404).send('Entry not found.');
+           
         } else {
-            // let postPet = {"name": "Cornflake", "age": 3, "Kind": "parakeet"};
-            let petData = JSON.parse(data);
-            petData.push(postPet);
-            fs.writeFile('./pets.json', JSON.stringify(petData), (error)=>{
-                if(error){
-                    console.log('Error found: ', error);
-                } else {
-                    res.send(petData);
-                }
-            });
+            res.send(result.rows);
         }
     });
 });
 
+//POST METHOD for adding new pets to database
+app.post('/api/pets', (req, res)=>{
+    let newPet = req.body;
+    client.query('INSERT INTO pets (age, kind, pet_name) VALUES ($1, $2, $3) RETURNING *', 
+    [newPet.age, newPet.kind, newPet.name])
+    .then(result => {
+        res.send(result.rows);
+    })
+})
+
+//PATCH METHOD for updating pet name
+app.patch('/api/pets/:id', (req, res)=>{
+    let petId = req.params.id;
+    let newName = req.body.name;
+    client.query('UPDATE pets SET pet_name=$1 WHERE id=$2 RETURNING *', [newName, petId])
+    .then(result=>{
+        res.send(result.rows);
+    })
+})
+
+//DELETE METHOD for deleting a row by [condition]
+app.delete('/api/pets/:id', (req, res)=>{
+    let petId = req.params.id;
+    let deleteName = req.body.name;
+    client.query('DELETE FROM pets WHERE id=$1 AND name=$2 RETURNING *', [petId, deleteName])
+    .then(result =>{
+        res.send(result.rows);
+    })
+})
+
+app.use((req, res, next) =>{
+    res.status(404).send('Not found');
+});
+
+app.use((err, req, res, next) => {
+    console.error(err.stack)
+    res.status(500).send('Something broke!')
+  });
+
+
+
 app.listen(PORT, ()=>{
     console.log('Listening on port: ', PORT);
 })
+
+
+
+
 
 
